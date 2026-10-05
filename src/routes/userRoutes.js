@@ -1,43 +1,30 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const User = require('../models/User');
-const { upload, uploadsDir } = require('../middleware/upload');
+const { upload } = require('../middleware/upload');
+const { uploadImage, deleteImage, publicImageUrl } = require('../storage');
 
 const router = express.Router();
 
-// Build a full, absolute image URL from the stored relative path.
-function toPublicUser(userDoc, req) {
+// Resolve the stored Supabase object key into a URL the app can load.
+function toPublicUser(userDoc) {
   const user = userDoc.toObject();
-  const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
   return {
     id: user._id,
     name: user.name,
     email: user.email,
     phone: user.phone,
     address: user.address,
-    imageUrl: user.imagePath ? `${baseUrl}${user.imagePath}` : null,
+    imageUrl: publicImageUrl(user.imagePath),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
-}
-
-function deleteFileIfExists(imagePath) {
-  if (!imagePath) return;
-  const filename = path.basename(imagePath);
-  const fullPath = path.join(uploadsDir, filename);
-  fs.unlink(fullPath, (err) => {
-    if (err && err.code !== 'ENOENT') {
-      console.error('Failed to delete image file:', fullPath, err.message);
-    }
-  });
 }
 
 // GET /api/users - list all users, newest first
 router.get('/', async (req, res) => {
   try {
     const users = await User.find().sort({ createdAt: -1 });
-    res.json(users.map((u) => toPublicUser(u, req)));
+    res.json(users.map((u) => toPublicUser(u)));
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users', details: err.message });
   }
@@ -48,7 +35,7 @@ router.get('/:id', async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(toPublicUser(user, req));
+    res.json(toPublicUser(user));
   } catch (err) {
     res.status(400).json({ error: 'Invalid user id', details: err.message });
   }
@@ -67,11 +54,11 @@ router.post('/', upload.single('image'), async (req, res) => {
       email,
       phone,
       address,
-      imagePath: req.file ? `/uploads/${req.file.filename}` : null,
+      imagePath: req.file ? await uploadImage(req.file) : null,
     });
 
     await user.save();
-    res.status(201).json(toPublicUser(user, req));
+    res.status(201).json(toPublicUser(user));
   } catch (err) {
     res.status(400).json({ error: 'Failed to create user', details: err.message });
   }
@@ -90,23 +77,24 @@ router.put('/:id', upload.single('image'), async (req, res) => {
     if (address !== undefined) user.address = address;
 
     if (req.file) {
-      deleteFileIfExists(user.imagePath);
-      user.imagePath = `/uploads/${req.file.filename}`;
+      const previousPath = user.imagePath;
+      user.imagePath = await uploadImage(req.file);
+      await deleteImage(previousPath);
     }
 
     await user.save();
-    res.json(toPublicUser(user, req));
+    res.json(toPublicUser(user));
   } catch (err) {
     res.status(400).json({ error: 'Failed to update user', details: err.message });
   }
 });
 
-// DELETE /api/users/:id - delete a user and its image file
+// DELETE /api/users/:id - delete a user and its stored image object
 router.delete('/:id', async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    deleteFileIfExists(user.imagePath);
+    await deleteImage(user.imagePath);
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: 'Failed to delete user', details: err.message });

@@ -23,8 +23,10 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
-    // Relative path on disk, e.g. "/uploads/16903456-photo.jpg".
-    // The full URL is built at read-time using BASE_URL.
+    // Object key inside the Supabase Storage bucket, e.g.
+    // "16903456-847291043.jpg". The public URL is derived at read-time
+    // in ../storage.js. Rows created before the move to Supabase still
+    // hold a "/uploads/..." disk path; those resolve to a null imageUrl.
     imagePath: {
       type: String,
       default: null,
