@@ -11,8 +11,11 @@ async function connectDB() {
   }
 
   try {
-    await mongoose.connect(uri);
-    console.log('Connected to MongoDB');
+    // Without an explicit dbName, a URI with no "/<db>" path silently lands
+    // in Atlas's default "test" database.
+    const dbName = process.env.MONGODB_DB || 'theena_address';
+    await mongoose.connect(uri, { dbName });
+    console.log(`Connected to MongoDB (${dbName})`);
   } catch (err) {
     console.error('Failed to connect to MongoDB:', err.message);
     process.exit(1);
